@@ -13,6 +13,11 @@ type CaptureState =
   | { status: "error"; message: string }
   | { status: "success"; brief: Brief };
 
+type BriefListState =
+  | { status: "loading"; briefs: Brief[] }
+  | { status: "ready"; briefs: Brief[] }
+  | { status: "error"; briefs: Brief[]; message: string };
+
 const initialTabState: TabState = {
   url: null,
   tool: null
@@ -22,6 +27,10 @@ export function App() {
   const [tabState, setTabState] = useState<TabState>(initialTabState);
   const [isLoading, setIsLoading] = useState(true);
   const [captureState, setCaptureState] = useState<CaptureState>({ status: "idle" });
+  const [briefListState, setBriefListState] = useState<BriefListState>({
+    status: "loading",
+    briefs: []
+  });
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -36,6 +45,36 @@ export function App() {
   }, []);
 
   const isSupported = Boolean(tabState.tool);
+
+  async function loadBriefs() {
+    setBriefListState((current) => ({
+      status: "loading",
+      briefs: current.briefs
+    }));
+
+    try {
+      const response = await fetch("http://127.0.0.1:4000/briefs");
+      if (!response.ok) {
+        throw new Error("Failed to load saved briefs.");
+      }
+
+      const json = (await response.json()) as { briefs?: Brief[] };
+      setBriefListState({
+        status: "ready",
+        briefs: json.briefs ?? []
+      });
+    } catch (error) {
+      setBriefListState((current) => ({
+        status: "error",
+        briefs: current.briefs,
+        message: error instanceof Error ? error.message : "Unknown brief loading error"
+      }));
+    }
+  }
+
+  useEffect(() => {
+    void loadBriefs();
+  }, []);
 
   async function generateAndSaveBrief(capture: CaptureRequest): Promise<Brief> {
     const generateResponse = await fetch("http://127.0.0.1:4000/briefs/generate", {
@@ -135,6 +174,7 @@ export function App() {
               status: "success",
               brief
             });
+            void loadBriefs();
           } catch (error) {
             setCaptureState({
               status: "error",
@@ -352,12 +392,88 @@ export function App() {
               marginTop: 12,
               paddingTop: 10,
               borderTop: "1px solid rgba(255,255,255,0.06)",
-              color: "#7e8798",
-              fontSize: 10.5,
-              lineHeight: 1.45
+              color: "#7e8798"
             }}
           >
-            Next: recent briefs, full capture, and injection into supported tools.
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#c8d0dd" }}>Recent Briefs</div>
+              <button
+                type="button"
+                onClick={() => void loadBriefs()}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#8ea4bd",
+                  fontSize: 10.5,
+                  cursor: "pointer",
+                  padding: 0
+                }}
+              >
+                Refresh
+              </button>
+            </div>
+
+            {briefListState.status === "error" ? (
+              <div style={{ fontSize: 10.5, lineHeight: 1.45, color: "#d1a3a3" }}>{briefListState.message}</div>
+            ) : null}
+
+            {briefListState.status === "loading" && briefListState.briefs.length === 0 ? (
+              <div style={{ fontSize: 10.5, lineHeight: 1.45 }}>Loading briefs...</div>
+            ) : null}
+
+            {briefListState.briefs.length === 0 && briefListState.status !== "loading" ? (
+              <div style={{ fontSize: 10.5, lineHeight: 1.45 }}>No saved briefs yet.</div>
+            ) : null}
+
+            {briefListState.briefs.length > 0 ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                {briefListState.briefs.slice(0, 3).map((brief) => (
+                  <div
+                    key={brief.id}
+                    style={{
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.06)",
+                      background: "rgba(18, 22, 30, 0.9)",
+                      padding: 9
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "#e6ebf2",
+                        marginBottom: 4,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis"
+                      }}
+                    >
+                      {brief.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10.5,
+                        lineHeight: 1.4,
+                        color: "#8f98a8",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden"
+                      }}
+                    >
+                      {brief.summary}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
