@@ -1,0 +1,112 @@
+{
+  "info": {
+    "_postman_id": "5f7f50bc-8300-4308-90f8-6fd4cc02689d",
+    "name": "Relay API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for the current Relay API scaffold."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:4000"
+    },
+    {
+      "key": "briefId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Generate Brief",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"capture\": {\n    \"sourceTool\": \"chatgpt\",\n    \"sourceUrl\": \"https://chatgpt.com/c/test\",\n    \"title\": \"Terraform stream condition\",\n    \"rawMessages\": [\n      {\n        \"role\": \"user\",\n        \"content\": \"How do I conditionally fetch an OCI stream in Terraform?\"\n      },\n      {\n        \"role\": \"assistant\",\n        \"content\": \"Use count with a conditional expression.\"\n      }\n    ]\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/briefs/generate",
+          "host": ["{{baseUrl}}"],
+          "path": ["briefs", "generate"]
+        }
+      }
+    },
+    {
+      "name": "Create Brief",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const json = pm.response.json();",
+              "if (json?.brief?.id) {",
+              "  pm.collectionVariables.set('briefId', json.brief.id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"brief\": {\n    \"title\": \"Terraform stream condition\",\n    \"summary\": \"Short summary\",\n    \"userIntent\": \"Conditionally fetch an OCI stream\",\n    \"constraints\": [\"Skip certain regions\"],\n    \"keyDecisions\": [\"Use count\"],\n    \"technicalDetails\": [\"Gate on capability and airport code\"],\n    \"sourceTool\": \"chatgpt\",\n    \"sourceUrl\": \"https://chatgpt.com/c/test\",\n    \"rawMessages\": [\n      {\n        \"role\": \"user\",\n        \"content\": \"How do I conditionally fetch an OCI stream in Terraform?\"\n      }\n    ],\n    \"formattedPayload\": \"**ACTIVE BRIEF CONTEXT**\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/briefs",
+          "host": ["{{baseUrl}}"],
+          "path": ["briefs"]
+        }
+      }
+    },
+    {
+      "name": "List Briefs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/briefs",
+          "host": ["{{baseUrl}}"],
+          "path": ["briefs"]
+        }
+      }
+    },
+    {
+      "name": "Get Brief By Id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/briefs/{{briefId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["briefs", "{{briefId}}"]
+        }
+      }
+    }
+  ]
+}

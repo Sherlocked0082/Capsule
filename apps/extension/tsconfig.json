@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["dom", "es2022"],
+    "types": ["chrome", "node"]
+  },
+  "include": ["entrypoints", "lib", "wxt.config.ts"]
+}
