@@ -8,7 +8,9 @@ export default defineConfig({
     host_permissions: [
       "https://chatgpt.com/*",
       "https://claude.ai/*",
-      "https://gemini.google.com/*"
+      "https://gemini.google.com/*",
+      "http://127.0.0.1:4000/*",
+      "http://localhost:4000/*"
     ]
   }
 });
