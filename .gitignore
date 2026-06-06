@@ -8,3 +8,5 @@ build
 coverage
 .DS_Store
 *.log
+apps/extension/.output
+apps/extension/.wxt
