@@ -18,6 +18,12 @@ type BriefListState =
   | { status: "ready"; briefs: Brief[] }
   | { status: "error"; briefs: Brief[]; message: string };
 
+type InjectState =
+  | { status: "idle" }
+  | { status: "injecting" }
+  | { status: "error"; message: string }
+  | { status: "success"; briefId: string };
+
 const initialTabState: TabState = {
   url: null,
   tool: null
@@ -31,6 +37,8 @@ export function App() {
     status: "loading",
     briefs: []
   });
+  const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
+  const [injectState, setInjectState] = useState<InjectState>({ status: "idle" });
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -45,6 +53,8 @@ export function App() {
   }, []);
 
   const isSupported = Boolean(tabState.tool);
+  const selectedBrief =
+    briefListState.briefs.find((brief) => brief.id === selectedBriefId) ?? briefListState.briefs[0] ?? null;
 
   async function loadBriefs() {
     setBriefListState((current) => ({
@@ -59,10 +69,12 @@ export function App() {
       }
 
       const json = (await response.json()) as { briefs?: Brief[] };
+      const briefs = json.briefs ?? [];
       setBriefListState({
         status: "ready",
-        briefs: json.briefs ?? []
+        briefs
       });
+      setSelectedBriefId((current) => current ?? briefs[0]?.id ?? null);
     } catch (error) {
       setBriefListState((current) => ({
         status: "error",
@@ -174,6 +186,7 @@ export function App() {
               status: "success",
               brief
             });
+            setSelectedBriefId(brief.id);
             void loadBriefs();
           } catch (error) {
             setCaptureState({
@@ -181,6 +194,67 @@ export function App() {
               message: error instanceof Error ? error.message : "Unknown brief generation error"
             });
           }
+        }
+      );
+    });
+  }
+
+  async function handleInject() {
+    if (tabState.tool !== "claude") {
+      setInjectState({
+        status: "error",
+        message: "Claude injection is the only target implemented right now."
+      });
+      return;
+    }
+
+    if (!selectedBrief) {
+      setInjectState({
+        status: "error",
+        message: "Select a brief before trying to inject."
+      });
+      return;
+    }
+
+    setInjectState({ status: "injecting" });
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (!activeTab?.id) {
+        setInjectState({
+          status: "error",
+          message: "No active tab was found."
+        });
+        return;
+      }
+
+      chrome.tabs.sendMessage(
+        activeTab.id,
+        {
+          type: "relay:inject-claude",
+          payload: selectedBrief.formattedPayload
+        },
+        (response?: { ok: boolean; error?: string }) => {
+          if (chrome.runtime.lastError) {
+            setInjectState({
+              status: "error",
+              message: chrome.runtime.lastError.message ?? "Content script communication failed."
+            });
+            return;
+          }
+
+          if (!response?.ok) {
+            setInjectState({
+              status: "error",
+              message: response?.error ?? "Injection failed."
+            });
+            return;
+          }
+
+          setInjectState({
+            status: "success",
+            briefId: selectedBrief.id
+          });
         }
       );
     });
@@ -387,6 +461,42 @@ export function App() {
             </div>
           ) : null}
 
+          {injectState.status === "error" ? (
+            <div
+              style={{
+                marginTop: 12,
+                borderRadius: 12,
+                border: "1px solid rgba(128, 47, 47, 0.35)",
+                background: "rgba(37, 19, 21, 0.95)",
+                color: "#ffb4b4",
+                padding: 10,
+                fontSize: 11.5,
+                lineHeight: 1.5
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Injection failed</div>
+              {injectState.message}
+            </div>
+          ) : null}
+
+          {injectState.status === "success" && selectedBrief && injectState.briefId === selectedBrief.id ? (
+            <div
+              style={{
+                marginTop: 12,
+                borderRadius: 12,
+                border: "1px solid rgba(47, 128, 78, 0.35)",
+                background: "rgba(16, 27, 19, 0.95)",
+                color: "#c6f6cf",
+                padding: 10,
+                fontSize: 11.5,
+                lineHeight: 1.5
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Injected into Claude</div>
+              Prompt box updated with the selected brief.
+            </div>
+          ) : null}
+
           <div
             style={{
               marginTop: 12,
@@ -435,13 +545,24 @@ export function App() {
             {briefListState.briefs.length > 0 ? (
               <div style={{ display: "grid", gap: 8 }}>
                 {briefListState.briefs.slice(0, 3).map((brief) => (
-                  <div
+                  <button
                     key={brief.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedBriefId(brief.id);
+                      setInjectState({ status: "idle" });
+                    }}
                     style={{
+                      textAlign: "left",
                       borderRadius: 10,
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      background: "rgba(18, 22, 30, 0.9)",
-                      padding: 9
+                      border:
+                        selectedBrief?.id === brief.id
+                          ? "1px solid rgba(96, 120, 146, 0.42)"
+                          : "1px solid rgba(255,255,255,0.06)",
+                      background:
+                        selectedBrief?.id === brief.id ? "rgba(31, 39, 51, 0.96)" : "rgba(18, 22, 30, 0.9)",
+                      padding: 9,
+                      cursor: "pointer"
                     }}
                   >
                     <div
@@ -470,10 +591,65 @@ export function App() {
                     >
                       {brief.summary}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             ) : null}
+
+            {selectedBrief ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "rgba(18, 22, 30, 0.92)",
+                  padding: 9
+                }}
+              >
+                <div style={{ fontSize: 10.5, color: "#97a0b2", marginBottom: 6 }}>Selected brief preview</div>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    lineHeight: 1.45,
+                    color: "#c8d0dd",
+                    whiteSpace: "pre-wrap",
+                    maxHeight: 96,
+                    overflow: "auto"
+                  }}
+                >
+                  {selectedBrief.formattedPayload}
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              disabled={!selectedBrief || tabState.tool !== "claude" || injectState.status === "injecting"}
+              onClick={handleInject}
+              style={{
+                width: "100%",
+                marginTop: 10,
+                borderRadius: 12,
+                border: "1px solid rgba(96, 120, 146, 0.26)",
+                background:
+                  selectedBrief && tabState.tool === "claude"
+                    ? "linear-gradient(180deg, rgba(79, 96, 117, 0.35), rgba(49, 62, 80, 0.45))"
+                    : "#0f1218",
+                color: selectedBrief && tabState.tool === "claude" ? "#e4edf7" : "#697386",
+                padding: "11px 12px",
+                cursor: selectedBrief && tabState.tool === "claude" ? "pointer" : "not-allowed",
+                fontSize: 12.5,
+                fontWeight: 700,
+                boxShadow:
+                  selectedBrief && tabState.tool === "claude" ? "inset 0 1px 0 rgba(255,255,255,0.06)" : "none"
+              }}
+            >
+              {injectState.status === "injecting"
+                ? "Injecting into Claude..."
+                : tabState.tool === "claude"
+                  ? "Inject selected brief into Claude"
+                  : "Open Claude to inject selected brief"}
+            </button>
           </div>
         </div>
       </section>
