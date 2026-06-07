@@ -50,17 +50,28 @@ export type CaptureRequest = z.infer<typeof captureRequestSchema>;
 export type GenerateBriefRequest = z.infer<typeof generateBriefRequestSchema>;
 export type CreateBriefRequest = z.infer<typeof createBriefRequestSchema>;
 
+function formatListSection(title: string, items: string[]): string[] {
+  if (items.length === 0) {
+    return [`- **${title}**: None recorded.`];
+  }
+
+  return [
+    `- **${title}**:`,
+    ...items.map((item) => `  - ${item}`)
+  ];
+}
+
 export function formatBriefPayload(brief: Omit<Brief, "id" | "createdAt" | "updatedAt">): string {
   const sections = [
     "**ACTIVE BRIEF CONTEXT**",
     "",
     `- **User Intent**: ${brief.userIntent}`,
     "",
-    `- **Key decisions made**: ${brief.keyDecisions.join("; ") || "None recorded."}`,
+    ...formatListSection("Key decisions made", brief.keyDecisions),
     "",
-    `- **Constraints or requirements identified**: ${brief.constraints.join("; ") || "None recorded."}`,
+    ...formatListSection("Constraints or requirements identified", brief.constraints),
     "",
-    `- **Technicalities/Details**: ${brief.technicalDetails.join("; ") || "None recorded."}`
+    ...formatListSection("Technicalities/Details", brief.technicalDetails)
   ];
 
   return sections.join("\n");
