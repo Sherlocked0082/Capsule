@@ -20,6 +20,13 @@ export const briefSchema = z.object({
   sourceUrl: z.string().url(),
   rawMessages: z.array(rawMessageSchema),
   formattedPayload: z.string().min(1),
+  generationMetadata: z
+    .object({
+      mode: z.enum(["openai", "heuristic"]),
+      model: z.string().optional(),
+      fallbackReason: z.string().optional()
+    })
+    .optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

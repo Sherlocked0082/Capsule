@@ -12,6 +12,7 @@
   "dependencies": {
     "@hono/node-server": "^1.14.1",
     "@relay/shared": "file:../../packages/shared",
+    "dotenv": "^16.6.1",
     "hono": "^4.7.10",
     "zod": "^3.24.4"
   },
