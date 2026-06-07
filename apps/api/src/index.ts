@@ -167,6 +167,17 @@ type BriefDraft = Pick<
   "title" | "summary" | "userIntent" | "constraints" | "keyDecisions" | "technicalDetails"
 >;
 
+function normalizeBriefDraft(parsed: BriefDraft): BriefDraft {
+  return {
+    title: clampText(normalizeWhitespace(parsed.title), 72),
+    summary: clampText(normalizeWhitespace(parsed.summary), 280),
+    userIntent: clampText(normalizeWhitespace(parsed.userIntent), 220),
+    constraints: unique(parsed.constraints).slice(0, 5),
+    keyDecisions: unique(parsed.keyDecisions).slice(0, 5),
+    technicalDetails: unique(parsed.technicalDetails).slice(0, 8)
+  };
+}
+
 function buildOpenAiMessages(capture: CaptureRequest) {
   const transcript = capture.rawMessages
     .map((message, index) => `${index + 1}. [${message.role.toUpperCase()}] ${normalizeWhitespace(message.content)}`)
@@ -194,7 +205,45 @@ function buildOpenAiMessages(capture: CaptureRequest) {
   ];
 }
 
-async function generateBriefWithOpenAi(capture: CaptureRequest): Promise<BriefDraft | null> {
+function buildJsonOnlyMessages(capture: CaptureRequest) {
+  const transcript = capture.rawMessages
+    .map((message, index) => `${index + 1}. [${message.role.toUpperCase()}] ${normalizeWhitespace(message.content)}`)
+    .join("\n");
+
+  return [
+    {
+      role: "system",
+      content: [
+        "You convert AI chat transcripts into compact transfer briefs.",
+        "Return valid JSON only.",
+        "Do not use markdown fences.",
+        "Use this exact object shape:",
+        '{',
+        '  "title": string,',
+        '  "summary": string,',
+        '  "userIntent": string,',
+        '  "constraints": string[],',
+        '  "keyDecisions": string[],',
+        '  "technicalDetails": string[]',
+        '}',
+        "Extract only durable working state. Exclude exploratory questions unless they became decisions or constraints."
+      ].join("\n")
+    },
+    {
+      role: "user",
+      content: [
+        `Source tool: ${capture.sourceTool}`,
+        `Source URL: ${capture.sourceUrl}`,
+        `Current title: ${capture.title ?? "Untitled"}`,
+        "",
+        "Transcript:",
+        transcript
+      ].join("\n")
+    }
+  ];
+}
+
+async function generateBriefWithProvider(capture: CaptureRequest): Promise<BriefDraft | null> {
   if (!LLM_API_KEY) {
     return null;
   }
@@ -209,47 +258,88 @@ async function generateBriefWithOpenAi(capture: CaptureRequest): Promise<BriefDr
     headers["X-Title"] = "Relay";
   }
 
+  const requestBody = {
+    model: LLM_MODEL,
+    messages: buildOpenAiMessages(capture),
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "relay_brief",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: { type: "string" },
+            summary: { type: "string" },
+            userIntent: { type: "string" },
+            constraints: {
+              type: "array",
+              items: { type: "string" }
+            },
+            keyDecisions: {
+              type: "array",
+              items: { type: "string" }
+            },
+            technicalDetails: {
+              type: "array",
+              items: { type: "string" }
+            }
+          },
+          required: ["title", "summary", "userIntent", "constraints", "keyDecisions", "technicalDetails"]
+        }
+      }
+    }
+  };
+
   const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: buildOpenAiMessages(capture),
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "relay_brief",
-          strict: true,
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              title: { type: "string" },
-              summary: { type: "string" },
-              userIntent: { type: "string" },
-              constraints: {
-                type: "array",
-                items: { type: "string" }
-              },
-              keyDecisions: {
-                type: "array",
-                items: { type: "string" }
-              },
-              technicalDetails: {
-                type: "array",
-                items: { type: "string" }
-              }
-            },
-            required: ["title", "summary", "userIntent", "constraints", "keyDecisions", "technicalDetails"]
-          }
-        }
-      }
-    })
+    body: JSON.stringify(requestBody)
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`${LLM_PROVIDER} brief generation failed with status ${response.status}: ${errorText}`);
+    const unsupportedStructuredOutput =
+      response.status === 400 && /response format|json_schema|structured outputs/i.test(errorText);
+
+    if (!unsupportedStructuredOutput) {
+      throw new Error(`${LLM_PROVIDER} brief generation failed with status ${response.status}: ${errorText}`);
+    }
+
+    console.log(`[relay] provider=${LLM_PROVIDER} model=${LLM_MODEL} does not support json_schema, retrying with plain JSON`);
+
+    const fallbackResponse = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        messages: buildJsonOnlyMessages(capture)
+      })
+    });
+
+    if (!fallbackResponse.ok) {
+      const fallbackErrorText = await fallbackResponse.text();
+      throw new Error(
+        `${LLM_PROVIDER} plain-json brief generation failed with status ${fallbackResponse.status}: ${fallbackErrorText}`
+      );
+    }
+
+    const fallbackJson = (await fallbackResponse.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string;
+        };
+      }>;
+    };
+
+    const fallbackContent = fallbackJson.choices?.[0]?.message?.content;
+    if (!fallbackContent) {
+      throw new Error(`${LLM_PROVIDER} plain-json brief generation returned no content.`);
+    }
+
+    const parsedFallback = JSON.parse(fallbackContent) as BriefDraft;
+    return normalizeBriefDraft(parsedFallback);
   }
 
   const json = (await response.json()) as {
@@ -266,21 +356,14 @@ async function generateBriefWithOpenAi(capture: CaptureRequest): Promise<BriefDr
   }
 
   const parsed = JSON.parse(content) as BriefDraft;
-  return {
-    title: clampText(normalizeWhitespace(parsed.title), 72),
-    summary: clampText(normalizeWhitespace(parsed.summary), 280),
-    userIntent: clampText(normalizeWhitespace(parsed.userIntent), 220),
-    constraints: unique(parsed.constraints).slice(0, 5),
-    keyDecisions: unique(parsed.keyDecisions).slice(0, 5),
-    technicalDetails: unique(parsed.technicalDetails).slice(0, 8)
-  };
+  return normalizeBriefDraft(parsed);
 }
 
 async function generateBrief(capture: CaptureRequest): Promise<Brief> {
   const heuristicBrief = buildBriefFromCapture(capture);
 
   try {
-    const llmDraft = await generateBriefWithOpenAi(capture);
+    const llmDraft = await generateBriefWithProvider(capture);
     if (!llmDraft) {
       console.log(`[relay] brief generation mode=heuristic reason=no_llm_key provider=${LLM_PROVIDER}`);
       return heuristicBrief;
