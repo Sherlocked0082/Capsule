@@ -24,6 +24,8 @@ type InjectState =
   | { status: "error"; message: string }
   | { status: "success"; briefId: string };
 
+type CaptureMode = "quick" | "full";
+
 const initialTabState: TabState = {
   url: null,
   tool: null
@@ -39,6 +41,7 @@ export function App() {
   });
   const [selectedBriefId, setSelectedBriefId] = useState<string | null>(null);
   const [injectState, setInjectState] = useState<InjectState>({ status: "idle" });
+  const [captureMode, setCaptureMode] = useState<CaptureMode>("quick");
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -139,7 +142,7 @@ export function App() {
     return saveJson.brief;
   }
 
-  async function handleCapture() {
+  async function handleCapture(mode: CaptureMode) {
     if (tabState.tool !== "chatgpt") {
       setCaptureState({
         status: "error",
@@ -148,6 +151,7 @@ export function App() {
       return;
     }
 
+    setCaptureMode(mode);
     setCaptureState({ status: "capturing" });
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -162,7 +166,7 @@ export function App() {
 
       chrome.tabs.sendMessage(
         activeTab.id,
-        { type: "relay:capture-chatgpt" },
+        { type: mode === "full" ? "relay:capture-chatgpt-full" : "relay:capture-chatgpt" },
         async (response?: { ok: boolean; error?: string; capture?: CaptureRequest }) => {
           if (chrome.runtime.lastError) {
             setCaptureState({
@@ -389,40 +393,70 @@ export function App() {
             }}
           >
             <div style={{ fontSize: 11.5, color: "#97a0b2", marginBottom: 6 }}>Capture mode</div>
-            <div style={{ fontSize: 12, lineHeight: 1.4 }}>
-              <strong style={{ color: "#f3f4f6" }}>Quick Capture</strong>
-              <span style={{ color: "#97a0b2" }}>
-                {" "}
-                reads the messages currently loaded in the page and sends them to the Relay API.
-              </span>
+            <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+                <strong style={{ color: "#f3f4f6" }}>Quick Capture</strong>
+                <span style={{ color: "#97a0b2" }}>
+                  {" "}
+                  reads the messages currently loaded in the page and sends them to the Relay API.
+                </span>
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 1.4 }}>
+                <strong style={{ color: "#f3f4f6" }}>Full Capture</strong>
+                <span style={{ color: "#97a0b2" }}>
+                  {" "}
+                  scrolls upward in ChatGPT, loads older messages, dedupes them, and then generates the brief.
+                </span>
+              </div>
             </div>
           </div>
 
-          <button
-            type="button"
-            disabled={!isSupported || isLoading || captureState.status === "capturing"}
-            onClick={handleCapture}
-            style={{
-              width: "100%",
-              borderRadius: 12,
-              border: "1px solid rgba(96, 120, 146, 0.26)",
-              background: isSupported
-                ? "linear-gradient(180deg, rgba(79, 96, 117, 0.35), rgba(49, 62, 80, 0.45))"
-                : "#0f1218",
-              color: isSupported ? "#e4edf7" : "#697386",
-              padding: "11px 12px",
-              cursor: isSupported ? "pointer" : "not-allowed",
-              fontSize: 12.5,
-              fontWeight: 700,
-              boxShadow: isSupported ? "inset 0 1px 0 rgba(255,255,255,0.06)" : "none"
-            }}
-          >
-            {captureState.status === "capturing"
-              ? "Capturing conversation..."
-              : isSupported
-                ? `Capture from ${tabState.tool}`
-                : "Capture unavailable on this site"}
-          </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <button
+              type="button"
+              disabled={!isSupported || isLoading || captureState.status === "capturing"}
+              onClick={() => void handleCapture("quick")}
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                border: "1px solid rgba(96, 120, 146, 0.26)",
+                background: isSupported
+                  ? "linear-gradient(180deg, rgba(79, 96, 117, 0.35), rgba(49, 62, 80, 0.45))"
+                  : "#0f1218",
+                color: isSupported ? "#e4edf7" : "#697386",
+                padding: "11px 12px",
+                cursor: isSupported ? "pointer" : "not-allowed",
+                fontSize: 12.5,
+                fontWeight: 700,
+                boxShadow: isSupported ? "inset 0 1px 0 rgba(255,255,255,0.06)" : "none"
+              }}
+            >
+              {captureState.status === "capturing" && captureMode === "quick"
+                ? "Capturing..."
+                : "Quick Capture"}
+            </button>
+            <button
+              type="button"
+              disabled={!isSupported || isLoading || captureState.status === "capturing"}
+              onClick={() => void handleCapture("full")}
+              style={{
+                width: "100%",
+                borderRadius: 12,
+                border: "1px solid rgba(96, 120, 146, 0.26)",
+                background: isSupported
+                  ? "linear-gradient(180deg, rgba(61, 79, 102, 0.4), rgba(37, 48, 63, 0.5))"
+                  : "#0f1218",
+                color: isSupported ? "#e4edf7" : "#697386",
+                padding: "11px 12px",
+                cursor: isSupported ? "pointer" : "not-allowed",
+                fontSize: 12.5,
+                fontWeight: 700,
+                boxShadow: isSupported ? "inset 0 1px 0 rgba(255,255,255,0.06)" : "none"
+              }}
+            >
+              {captureState.status === "capturing" && captureMode === "full" ? "Loading history..." : "Full Capture"}
+            </button>
+          </div>
 
           {captureState.status === "error" ? (
             <div

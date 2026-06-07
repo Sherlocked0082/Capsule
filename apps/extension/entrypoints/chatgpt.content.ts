@@ -1,6 +1,6 @@
 import { captureRequestSchema } from "@relay/shared";
 import { defineContentScript } from "wxt/utils/define-content-script";
-import { extractChatGptCapture } from "../lib/chatgpt";
+import { extractChatGptCapture, extractChatGptCaptureFull } from "../lib/chatgpt";
 
 type CaptureResponse =
   | { ok: true; capture: ReturnType<typeof extractChatGptCapture> }
@@ -10,36 +10,42 @@ export default defineContentScript({
   matches: ["https://chatgpt.com/*"],
   main() {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type !== "relay:capture-chatgpt") {
+      if (message?.type !== "relay:capture-chatgpt" && message?.type !== "relay:capture-chatgpt-full") {
         return undefined;
       }
 
-      let response: CaptureResponse;
+      void (async () => {
+        let response: CaptureResponse;
 
-      try {
-        const capture = extractChatGptCapture();
-        const parsed = captureRequestSchema.safeParse(capture);
+        try {
+          const capture =
+            message?.type === "relay:capture-chatgpt-full"
+              ? await extractChatGptCaptureFull()
+              : extractChatGptCapture();
+          const parsed = captureRequestSchema.safeParse(capture);
 
-        if (!parsed.success) {
+          if (!parsed.success) {
+            response = {
+              ok: false,
+              error: "Extracted ChatGPT messages did not match the expected capture format."
+            };
+          } else {
+            response = {
+              ok: true,
+              capture: parsed.data
+            };
+          }
+        } catch (error) {
           response = {
             ok: false,
-            error: "Extracted ChatGPT messages did not match the expected capture format."
-          };
-        } else {
-          response = {
-            ok: true,
-            capture: parsed.data
+            error: error instanceof Error ? error.message : "Unknown ChatGPT capture error"
           };
         }
-      } catch (error) {
-        response = {
-          ok: false,
-          error: error instanceof Error ? error.message : "Unknown ChatGPT capture error"
-        };
-      }
 
-      sendResponse(response);
-      return false;
+        sendResponse(response);
+      })();
+
+      return true;
     });
   }
 });
